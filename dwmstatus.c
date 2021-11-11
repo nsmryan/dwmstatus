@@ -2,10 +2,12 @@
  * Copy me if you can.
  * by 20h
  */
+/* Modified by Noah Ryan */
 
 #define _BSD_SOURCE
 #include <unistd.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
@@ -21,8 +23,7 @@
 static Display *dpy;
 
 
-char *
-smprintf(char *fmt, ...)
+char* smprintf(char *fmt, ...)
 {
 	va_list fmtargs;
 	char *ret;
@@ -45,24 +46,17 @@ smprintf(char *fmt, ...)
 	return ret;
 }
 
-void
-settz(char *tzname)
-{
-	setenv("TZ", tzname, 1);
-}
-
-char *
-mktimes(char *fmt, char *tzname)
+char* mktimes(char *fmt, char *tzname)
 {
 	char buf[129];
 	time_t tim;
 	struct tm *timtm;
 
-	settz(tzname);
 	tim = time(NULL);
 	timtm = localtime(&tim);
-	if (timtm == NULL)
+	if (timtm == NULL) {
 		return smprintf("");
+    }
 
 	if (!strftime(buf, sizeof(buf)-1, fmt, timtm)) {
 		fprintf(stderr, "strftime == 0\n");
@@ -72,26 +66,24 @@ mktimes(char *fmt, char *tzname)
 	return smprintf("%s", buf);
 }
 
-void
-setstatus(char *str)
+void setstatus(char *str)
 {
 	XStoreName(dpy, DefaultRootWindow(dpy), str);
 	XSync(dpy, False);
 }
 
-char *
-loadavg(void)
+char* loadavg(void)
 {
 	double avgs[3];
 
-	if (getloadavg(avgs, 3) < 0)
+	if (getloadavg(avgs, 3) < 0) {
 		return smprintf("");
+    }
 
 	return smprintf("%.2f %.2f %.2f", avgs[0], avgs[1], avgs[2]);
 }
 
-char *
-readfile(char *base, char *file)
+char* readfile(char *base, char *file)
 {
 	char *path, line[513];
 	FILE *fd;
@@ -101,18 +93,20 @@ readfile(char *base, char *file)
 	path = smprintf("%s/%s", base, file);
 	fd = fopen(path, "r");
 	free(path);
-	if (fd == NULL)
+	if (fd == NULL) {
 		return NULL;
+    }
 
-	if (fgets(line, sizeof(line)-1, fd) == NULL)
+	if (fgets(line, sizeof(line)-1, fd) == NULL) {
 		return NULL;
+    }
+
 	fclose(fd);
 
 	return smprintf("%s", line);
 }
 
-char *
-getbattery(char *base)
+char* getbattery(char *base)
 {
 	char *co, status;
 	int descap, remcap;
@@ -121,8 +115,10 @@ getbattery(char *base)
 	remcap = -1;
 
 	co = readfile(base, "present");
-	if (co == NULL)
+	if (co == NULL) {
 		return smprintf("");
+    }
+
 	if (co[0] != '1') {
 		free(co);
 		return smprintf("not present");
@@ -132,8 +128,9 @@ getbattery(char *base)
 	co = readfile(base, "charge_full_design");
 	if (co == NULL) {
 		co = readfile(base, "energy_full_design");
-		if (co == NULL)
+		if (co == NULL) {
 			return smprintf("");
+        }
 	}
 	sscanf(co, "%d", &descap);
 	free(co);
@@ -141,8 +138,9 @@ getbattery(char *base)
 	co = readfile(base, "charge_now");
 	if (co == NULL) {
 		co = readfile(base, "energy_now");
-		if (co == NULL)
+		if (co == NULL) {
 			return smprintf("");
+        }
 	}
 	sscanf(co, "%d", &remcap);
 	free(co);
@@ -150,59 +148,86 @@ getbattery(char *base)
 	co = readfile(base, "status");
 	if (!strncmp(co, "Discharging", 11)) {
 		status = '-';
-	} else if(!strncmp(co, "Charging", 8)) {
+	} else if (!strncmp(co, "Charging", 8)) {
 		status = '+';
 	} else {
 		status = '?';
 	}
 
-	if (remcap < 0 || descap < 0)
+	if (remcap < 0 || descap < 0) {
 		return smprintf("invalid");
+    }
 
 	return smprintf("%.0f%%%c", ((float)remcap / (float)descap) * 100, status);
 }
 
-char *
-gettemperature(char *base, char *sensor)
+char* gettemperature(char *base, char *sensor)
 {
 	char *co;
 
 	co = readfile(base, sensor);
-	if (co == NULL)
+	if (co == NULL) {
 		return smprintf("");
+    }
+
 	return smprintf("%02.0f°C", atof(co) / 1000);
 }
 
-int
-main(void)
+char *getbrightness(char *base)
+{
+	char *current;
+	char *max;
+    double brightness;
+    double max_brightness;
+
+	current = readfile(base, "brightness");
+	if (current == NULL) {
+		return smprintf("");
+    }
+
+	max = readfile(base, "max_brightness");
+	if (max == NULL) {
+        free(current);
+		return smprintf("");
+    }
+    sscanf(current, "%lf", &brightness);
+    sscanf(max, "%lf", &max_brightness);
+
+    free(current);
+    free(max);
+
+	return smprintf("%02.0f", 100.0 * (brightness / max_brightness));
+}
+
+
+int main(void)
 {
 	char *status;
-	char *bat;
 	char *bat1;
 	char *timestr;
+	char *brightness;
 
 	if (!(dpy = XOpenDisplay(NULL))) {
 		fprintf(stderr, "dwmstatus: cannot open display.\n");
 		return 1;
 	}
 
-	for (;;sleep(60)) {
-		bat = getbattery("/sys/class/power_supply/BAT0");
+    while (true)
+    {
 		bat1 = getbattery("/sys/class/power_supply/BAT1");
 		timestr = mktimes("%a %d %b %H:%M %Z %Y", "");
+        brightness = getbrightness("/sys/class/backlight/intel_backlight");
 
-        // not working, so removed
-		//t0 = gettemperature("/sys/devices/virtual/hwmon/hwmon0", "temp1_input");
-		//t1 = gettemperature("/sys/devices/virtual/hwmon/hwmon2", "temp1_input");
-		//t2 = gettemperature("/sys/devices/virtual/hwmon/hwmon4", "temp1_input");
-
-		status = smprintf("L:%s B:%s %s %s", bat, bat1, timestr);
+		status = smprintf("Bat1:%s B:%s %s", bat1, brightness, timestr);
 		setstatus(status);
+        //fprintf(stderr, "%s\n", status);
 
-		free(bat);
 		free(bat1);
 		free(timestr);
+		free(brightness);
 		free(status);
+
+        sleep(10);
 	}
 
 	XCloseDisplay(dpy);
